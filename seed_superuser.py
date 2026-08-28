@@ -1,47 +1,92 @@
 """
 One-off script to bootstrap the first superuser account.
 
-There's a chicken-and-egg problem with /admin/create-staff: it requires an
-existing superuser to call it. Run this once, directly against the database,
-to create that first account. After that, use /admin/create-staff (as this
-user) to create any further staff accounts through the API instead.
-
-Usage:
-    python seed_superuser.py
+IMPORTANT:
+- Never put the superuser password directly in this file.
+- Set SUPERUSER_PASSWORD as an environment variable before running.
+- This file is safe to commit to GitHub.
 """
+
+import os
 
 from database import SessionLocal, Base, engine, User, Wallet
 from auth import hash_password
 
-USERNAME = "super@elitexbets.com"
-EMAIL = "super@elitexbets.com"
-PASSWORD = "REMOVED_SECRET"
+
+USERNAME = os.getenv(
+    "SUPERUSER_USERNAME",
+    "super@elitexbets.com"
+)
+
+EMAIL = os.getenv(
+    "SUPERUSER_EMAIL",
+    "super@elitexbets.com"
+)
+
+PASSWORD = os.getenv("SUPERUSER_PASSWORD")
+
+if not PASSWORD:
+    raise RuntimeError(
+        "SUPERUSER_PASSWORD is not set. "
+        "Set it as an environment variable before running this script."
+    )
+
+if len(PASSWORD) < 12:
+    raise RuntimeError(
+        "SUPERUSER_PASSWORD must be at least 12 characters long."
+    )
+
 
 Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
+
 try:
-    existing = db.query(User).filter(
-        (User.username == USERNAME) | (User.email == EMAIL)
-    ).first()
+    existing = (
+        db.query(User)
+        .filter(
+            (User.username == USERNAME) |
+            (User.email == EMAIL)
+        )
+        .first()
+    )
 
     if existing:
-        print(f"A user with that username/email already exists (id={existing.id}, role={existing.role}). Nothing changed.")
+        print(
+            f"A user with that username/email already exists "
+            f"(id={existing.id}, role={existing.role})."
+        )
+        print("Nothing changed.")
+
     else:
-        su = User(
+        superuser = User(
             username=USERNAME,
             email=EMAIL,
             hashed_password=hash_password(PASSWORD),
             role="superuser",
-            is_verified=True,  # staff accounts skip OTP
+            is_verified=True,
+            is_active=True,
         )
-        db.add(su)
-        db.commit()
-        db.refresh(su)
 
-        db.add(Wallet(owner_id=su.id))
+        db.add(superuser)
+        db.commit()
+        db.refresh(superuser)
+
+        wallet = Wallet(
+            owner_id=superuser.id,
+            balance=0.0,
+            bonus_balance=0.0,
+        )
+
+        db.add(wallet)
         db.commit()
 
-        print(f"Superuser created: id={su.id}, username={su.username}, role={su.role}")
+        print(
+            f"Superuser created successfully: "
+            f"id={superuser.id}, "
+            f"username={superuser.username}, "
+            f"role={superuser.role}"
+        )
+
 finally:
     db.close()
